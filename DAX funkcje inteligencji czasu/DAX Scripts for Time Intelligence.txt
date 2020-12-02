@@ -1,0 +1,104 @@
+//Skrypt prezentacji Time Intelligence w DAX
+//SQLDay 2020
+//Hubert Kobierzewski
+
+Calendar DAX = ADDCOLUMNS(
+  CALENDAR( DATE( 2012, 1, 1) , DATE(2021, 12, 31) ), 
+  "Day", DAY([Date]), 
+  "Month", FORMAT([Date], "mmm"), 
+  "MonthNo", MONTH([Date]), 
+  "Year", YEAR([Date])
+  )
+
+Sales = SUM('Sales'[Revenue])
+
+Sales PY = CALCULATE([Sales], SAMEPERIODLASTYEAR('Calendar PQ'[Date]))
+
+YoY Growth% = DIVIDE([Sales] - [Sales PY], [Sales PY])
+
+//kolumna kalkulowana w Sales
+DateInt = YEAR([Date])*10000 + MONTH([Date])*100 + DAY([Date])
+
+Running Sales = CALCULATE([Sales], FILTER(ALL('Calendar PQ'), 'Calendar PQ'[Date] <= MAX('Calendar PQ'[Date])))
+
+Sales YTD 1 = CALCULATE([Sales], FILTER(ALL('Calendar PQ'), 'Calendar PQ'[Date] <= MAX('Calendar PQ'[Date])), VALUES('Calendar PQ'[Year]))
+
+Sales YTD 2 = IF([ShowValueForDates], CALCULATE([Sales], DATESYTD('Calendar PQ'[Date])))
+
+Sales YTD 3 = TOTALYTD([Sales], 'Calendar PQ'[Date])
+
+//zmień na matrix i odetnij total
+Sales YTD 1 = IF(HASONEVALUE('Calendar PQ'[Year]), CALCULATE([Sales], FILTER(ALL('Calendar PQ'), 'Calendar PQ'[Date] <= MAX('Calendar PQ'[Date])), VALUES('Calendar PQ'[Year])))
+
+Sales PM 1 = CALCULATE([Sales], PARALLELPERIOD('Calendar PQ'[Date], -1, MONTH))
+
+Sales PM 2 = CALCULATE([Sales], DATEADD('Calendar PQ'[Date], -1, MONTH))
+
+Sales 3m Avg 1 = IF([ShowValueForDates], CALCULATE([Sales], DATESBETWEEN('Calendar PQ'[Date], NEXTDAY(DATEADD(LASTDATE('Calendar PQ'[Date]), -3, MONTH)), LASTDATE('Calendar PQ'[Date]))) / 3)
+
+Sales 3m Avg 1 = 
+VAR DateRange = DATESBETWEEN('Calendar PQ'[Date], NEXTDAY(DATEADD(LASTDATE('Calendar PQ'[Date]), -3, MONTH)), LASTDATE('Calendar PQ'[Date]))
+VAR SizeOfDateRange = COUNTROWS(DateRange)
+VAR Result = IF([ShowValueForDates], CALCULATE([Sales], DateRange) / 3)
+RETURN SizeOfDateRange
+
+Sales 3m Avg 2 = 
+VAR DateRange = DATESINPERIOD('Calendar PQ'[Date], LASTDATE('Calendar PQ'[Date]), -3, MONTH)
+VAR SizeOfDateRange = COUNTROWS(DateRange)
+VAR Result = IF([ShowValueForDates], CALCULATE([Sales], DateRange) / 3)
+RETURN Result
+
+Sales FYTD = IF(AND([ShowValueForDates], HASONEVALUE('Calendar PQ'[FinYear])), CALCULATE([Sales], FILTER(ALL('Calendar PQ'), 'Calendar PQ'[Date] <= MAX('Calendar PQ'[Date])), VALUES('Calendar PQ'[FinYear])))
+
+
+//Power Query
+tmpDates
+let
+    Source = fxCalendar(#date(2012, 1, 1), #date(2021, 12, 31), "pl-PL"),
+    #"Removed Other Columns" = Table.SelectColumns(Source,{"Date", "DayInWeek"}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Removed Other Columns",{{"DayInWeek", Int64.Type}}),
+    #"Added Index" = Table.AddIndexColumn(#"Changed Type", "Index", 0, 1, Int64.Type)
+in
+    #"Added Index"
+
+USAWorkingDays
+let
+    Source = tmpDates,
+    #"Filtered Rows" = Table.SelectRows(Source, each [DayInWeek] < 6),
+    #"Added Custom" = Table.AddColumn(#"Filtered Rows", "WorkingDay", each if Number.Mod([Index], 20) = 0 then 0 else 1, Int64.Type),
+    #"Added Custom1" = Table.AddColumn(#"Added Custom", "Country", each "USA", type text)
+in
+    #"Added Custom1"
+
+WorkingDays
+let
+    Source = tmpDates,
+    #"Filtered Rows" = Table.SelectRows(Source, each [DayInWeek] < 6),
+    #"Added Custom" = Table.AddColumn(#"Filtered Rows", "WorkingDay", each if Number.Mod([Index], 15) = 0 then 0 else 1, Int64.Type),
+    #"Added Custom1" = Table.AddColumn(#"Added Custom", "Country", each "Australia", type text),
+    #"Appended Query" = Table.Combine({#"Added Custom1", USAWorkingDays})
+in
+    #"Appended Query"
+
+//zapytania tmpDates i USAWorkingDays wyłączamy z ładowania do modelu,
+//z nowych 3 zapytań wchodzi do modelu tylko WorkingDays
+
+
+//Power Pivot
+//Nowa tabelka
+Country = ALL(Geography[Country])
+//Łączymy ją z tabelami WorkingDays i Geography, dla ułatwienia relacje ustawiamy na dwukierunkowe
+
+Sales WD = IF(HASONEVALUE(WorkingDays[Country]), SUMX(WorkingDays, [Sales] * WorkingDays[WorkingDay]))
+
+Sales WD MTD = CALCULATE([Sales WD], DATESMTD('Calendar PQ'[Date]))
+
+
+
+
+
+
+
+
+
+
